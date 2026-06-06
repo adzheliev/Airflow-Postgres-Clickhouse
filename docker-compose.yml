@@ -1,0 +1,136 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: italy_postgres
+    environment:
+      POSTGRES_USER: italy
+      POSTGRES_PASSWORD: italy
+      POSTGRES_DB: italy_dwh
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U italy -d italy_dwh"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: italy_clickhouse
+    environment:
+      CLICKHOUSE_DB: italy_mart
+      CLICKHOUSE_USER: italy
+      CLICKHOUSE_PASSWORD: italy
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8125:8123"
+      - "9005:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user italy --password italy --query 'select 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: italy_airflow_init
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://italy:italy@postgres:5432/italy_dwh
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: italy-test-secret
+      AIRFLOW_CONN_ITALY_POSTGRES_CONNECTION: postgresql://italy:italy@postgres:5432/italy_dwh
+      AIRFLOW_CONN_ITALY_CLICKHOUSE_CONNECTION: http://italy:italy@clickhouse:8123/italy_mart
+      AIRFLOW_VAR_ITALY_DATA_DIR: /opt/airflow/data
+      AIRFLOW_VAR_ITALY_SQL_DIR: /opt/airflow/sql
+      AIRFLOW_VAR_ITALY_LANDING_DIR: /opt/airflow/data/landing
+      AIRFLOW_VAR_ITALY_INPUT_XLSX: /opt/airflow/data/input/Тестовое задание data инженер italy.xlsx
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: italy_dwh
+      DB_USER: italy
+      DB_PASSWORD: italy
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./sql:/opt/airflow/sql
+      - ./data:/opt/airflow/data
+    command: >
+      bash -c "airflow db migrate &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: italy_airflow_webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://italy:italy@postgres:5432/italy_dwh
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: italy-test-secret
+      AIRFLOW_CONN_ITALY_POSTGRES_CONNECTION: postgresql://italy:italy@postgres:5432/italy_dwh
+      AIRFLOW_CONN_ITALY_CLICKHOUSE_CONNECTION: http://italy:italy@clickhouse:8123/italy_mart
+      AIRFLOW_VAR_ITALY_DATA_DIR: /opt/airflow/data
+      AIRFLOW_VAR_ITALY_SQL_DIR: /opt/airflow/sql
+      AIRFLOW_VAR_ITALY_LANDING_DIR: /opt/airflow/data/landing
+      AIRFLOW_VAR_ITALY_INPUT_XLSX: /opt/airflow/data/input/Тестовое задание data инженер italy.xlsx
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: italy_dwh
+      DB_USER: italy
+      DB_PASSWORD: italy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./sql:/opt/airflow/sql
+      - ./data:/opt/airflow/data
+    command: airflow webserver
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: italy_airflow_scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://italy:italy@postgres:5432/italy_dwh
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: italy-test-secret
+      AIRFLOW_CONN_ITALY_POSTGRES_CONNECTION: postgresql://italy:italy@postgres:5432/italy_dwh
+      AIRFLOW_CONN_ITALY_CLICKHOUSE_CONNECTION: http://italy:italy@clickhouse:8123/italy_mart
+      AIRFLOW_VAR_ITALY_DATA_DIR: /opt/airflow/data
+      AIRFLOW_VAR_ITALY_SQL_DIR: /opt/airflow/sql
+      AIRFLOW_VAR_ITALY_LANDING_DIR: /opt/airflow/data/landing
+      AIRFLOW_VAR_ITALY_INPUT_XLSX: /opt/airflow/data/input/Тестовое задание data инженер italy.xlsx
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: italy_dwh
+      DB_USER: italy
+      DB_PASSWORD: italy
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./sql:/opt/airflow/sql
+      - ./data:/opt/airflow/data
+    command: airflow scheduler
+
+volumes:
+  postgres_data:
+  clickhouse_data:
