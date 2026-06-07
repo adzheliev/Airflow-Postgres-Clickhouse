@@ -176,6 +176,52 @@ dwh.fact_daily_plan_channel
 Так проще сравнивать план и факт по каналам и расширять модель при появлении
 новых каналов планирования.
 
+## Индексы и партиционирование
+
+Партиционирование добавлено для растущих fact/mart-таблиц, где естественным
+ключом отбора является учетная дата:
+
+```text
+dwh.fact_receipt_line partition by range(accounting_date)
+dwh.fact_receipt partition by range(accounting_date)
+dwh.fact_daily_plan_channel partition by range(accounting_date)
+mart.daily_plan_fact partition by range(accounting_date)
+```
+
+В тестовых данных явно созданы месячные партиции для доступных периодов:
+
+```text
+2025-02
+2025-03
+2026-02
+```
+
+Также добавлены default-партиции. Они нужны как safety net: если в исходной
+выгрузке появится дата вне ожидаемых месяцев, пайплайн не упадет на insert, а
+строка попадет в default partition и будет дополнительно видна через DQ.
+
+Справочники `dim_*` не партиционируются, потому что они небольшие и не являются
+основными растущими таблицами. Для них достаточно primary key и unique
+constraints.
+
+Индексы добавлены на основные поля фильтрации и соединений:
+
+```text
+receipt_id
+receipt_nk
+accounting_date
+line_item_type
+dish_id
+modifier_id
+category_id
+order_type_id
+plan_channel
+```
+
+Primary key и unique constraints также создают индексы автоматически. Ручные
+индексы добавлены там, где ожидаются частые join/filter сценарии: анализ по
+датам, проверка чеков, меню-аналитика, разрезы по категориям и типам строк.
+
 ## Публикация витрины
 
 После построения `mart.daily_plan_fact` основной DAG триггерит:

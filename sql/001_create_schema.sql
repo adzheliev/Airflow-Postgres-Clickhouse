@@ -80,6 +80,11 @@ create table stg.sales_lines (
 comment on table stg.sales_lines is
     'Typed and standardized sales receipt lines with deterministic technical keys, line item classification, duplicate-date diagnostics, and flags for rows excluded from analytical marts.';
 
+create index idx_stg_sales_lines_receipt_nk on stg.sales_lines (receipt_nk);
+create index idx_stg_sales_lines_accounting_date on stg.sales_lines (accounting_date);
+create index idx_stg_sales_lines_line_item_type on stg.sales_lines (line_item_type);
+create index idx_stg_sales_lines_exclude_from_marts on stg.sales_lines (exclude_from_marts);
+
 create table dwh.dim_order_type (
     order_type_id text primary key,
     order_type_name text not null unique
@@ -117,9 +122,9 @@ comment on table dwh.dim_modifier is
     'Modifier dimension containing source lines that describe dish options, add-ons, preparation variants, or service modifiers rather than standalone menu dishes.';
 
 create table dwh.fact_receipt_line (
-    receipt_line_id text primary key,
+    receipt_line_id text not null,
     receipt_id text not null,
-    accounting_date date,
+    accounting_date date not null,
     opened_at timestamp,
     closed_at timestamp,
     dish_id text references dwh.dim_dish(dish_id),
@@ -134,38 +139,92 @@ create table dwh.fact_receipt_line (
     is_zero_amount boolean not null,
     is_negative_amount boolean not null,
     source_sheet text not null,
-    source_row_number int not null
-);
+    source_row_number int not null,
+    primary key (receipt_line_id, accounting_date)
+) partition by range (accounting_date);
+
+create table dwh.fact_receipt_line_2025_02
+    partition of dwh.fact_receipt_line
+    for values from ('2025-02-01') to ('2025-03-01');
+
+create table dwh.fact_receipt_line_2025_03
+    partition of dwh.fact_receipt_line
+    for values from ('2025-03-01') to ('2025-04-01');
+
+create table dwh.fact_receipt_line_2026_02
+    partition of dwh.fact_receipt_line
+    for values from ('2026-02-01') to ('2026-03-01');
+
+create table dwh.fact_receipt_line_default
+    partition of dwh.fact_receipt_line default;
 
 comment on table dwh.fact_receipt_line is
     'Receipt line fact table at source line grain. Contains cleaned transactional measures, line item classification, and links to dish, modifier, category, and order type dimensions.';
 
+create index idx_fact_receipt_line_receipt_id on dwh.fact_receipt_line (receipt_id);
+create index idx_fact_receipt_line_accounting_date on dwh.fact_receipt_line (accounting_date);
+create index idx_fact_receipt_line_line_item_type on dwh.fact_receipt_line (line_item_type);
+create index idx_fact_receipt_line_dish_id on dwh.fact_receipt_line (dish_id);
+create index idx_fact_receipt_line_modifier_id on dwh.fact_receipt_line (modifier_id);
+create index idx_fact_receipt_line_category_id on dwh.fact_receipt_line (category_id);
+create index idx_fact_receipt_line_order_type_id on dwh.fact_receipt_line (order_type_id);
+
 create table dwh.fact_receipt (
-    receipt_id text primary key,
-    accounting_date date,
+    receipt_id text not null,
+    accounting_date date not null,
     opened_at timestamp,
     closed_at timestamp,
     order_type_id text references dwh.dim_order_type(order_type_id),
     guest_qty numeric(14, 4),
     total_dish_qty numeric(14, 4),
     total_net_amount numeric(14, 4),
-    line_count int
-);
+    line_count int,
+    primary key (receipt_id, accounting_date)
+) partition by range (accounting_date);
+
+create table dwh.fact_receipt_2025_02
+    partition of dwh.fact_receipt
+    for values from ('2025-02-01') to ('2025-03-01');
+
+create table dwh.fact_receipt_2025_03
+    partition of dwh.fact_receipt
+    for values from ('2025-03-01') to ('2025-04-01');
+
+create table dwh.fact_receipt_2026_02
+    partition of dwh.fact_receipt
+    for values from ('2026-02-01') to ('2026-03-01');
+
+create table dwh.fact_receipt_default
+    partition of dwh.fact_receipt default;
 
 comment on table dwh.fact_receipt is
     'Receipt header fact table at one row per receipt grain. Measures are aggregated from receipt lines after data quality exclusions.';
 
+create index idx_fact_receipt_accounting_date on dwh.fact_receipt (accounting_date);
+create index idx_fact_receipt_order_type_id on dwh.fact_receipt (order_type_id);
+
 create table dwh.fact_daily_plan_channel (
-    plan_id text primary key,
+    plan_id text not null,
     accounting_date date not null,
     plan_channel text not null,
     planned_amount numeric(14, 4),
     planned_total_amount numeric(14, 4),
+    primary key (plan_id, accounting_date),
     unique (accounting_date, plan_channel)
-);
+) partition by range (accounting_date);
+
+create table dwh.fact_daily_plan_channel_2026_02
+    partition of dwh.fact_daily_plan_channel
+    for values from ('2026-02-01') to ('2026-03-01');
+
+create table dwh.fact_daily_plan_channel_default
+    partition of dwh.fact_daily_plan_channel default;
 
 comment on table dwh.fact_daily_plan_channel is
     'Daily plan fact table at accounting date and plan channel grain. The table normalizes the wide Excel plan sheet into an analytical structure.';
+
+create index idx_fact_daily_plan_channel_accounting_date on dwh.fact_daily_plan_channel (accounting_date);
+create index idx_fact_daily_plan_channel_plan_channel on dwh.fact_daily_plan_channel (plan_channel);
 
 create table dq.receipt_multi_accounting_date (
     receipt_id text,
@@ -186,6 +245,9 @@ create table dq.receipt_multi_accounting_date (
 comment on table dq.receipt_multi_accounting_date is
     'Detailed data quality table with receipt lines whose receipt identifier appears on more than one accounting date.';
 
+create index idx_receipt_multi_accounting_date_receipt_id on dq.receipt_multi_accounting_date (receipt_id);
+create index idx_receipt_multi_accounting_date_accounting_date on dq.receipt_multi_accounting_date (accounting_date);
+
 create table dq.modifier_dish_lines (
     receipt_id text,
     receipt_number bigint,
@@ -201,6 +263,9 @@ create table dq.modifier_dish_lines (
 
 comment on table dq.modifier_dish_lines is
     'Detailed data quality table with source lines that look like menu modifiers rather than standalone dishes.';
+
+create index idx_modifier_dish_lines_accounting_date on dq.modifier_dish_lines (accounting_date);
+create index idx_modifier_dish_lines_category_name on dq.modifier_dish_lines (category_name);
 
 create table dq.check_results (
     check_name text primary key,
